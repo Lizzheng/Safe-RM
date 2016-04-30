@@ -1,12 +1,135 @@
 #!/bin/bash
 
-rootname_inode=$1
+function findInode(){
+
+        local inode=$(ls -i $1 | cut -d" " -f1)
+        echo $inode
+}
+
+function restorefileInfo(){
+
+        fullPath=$(readlink -f $1)
+        local baseName1=$(basename $1)
+        local pathName1=$fullPath
+        echo $baseName1'_'$(findInode $1):$pathName1 >> ~/.restore.info
+}
+
+function moveFile(){
+
+        local pathName=$(readlink -f $1)
+        local baseName=$(basename $1)
+        mv $pathName $recyclePath/$baseName'_'$(findInode $1)
+}
+
+function checkDir(){
+
+        if [ -d $1 ] ; then
+                echo "safe_rm: cannot remove '$1' since it is a directory"
+                exit
+        fi
+}
+
+function checkArg(){
+
+        if [ $# -eq 0 ] ; then
+                echo "safe_rm: missing filename"
+                exit
+        fi
+}
+
+function checkFileExist(){
+
+        if [ ! -e $1 ] ; then
+                echo "safe_rm: file does not exist"
+                exit
+        fi
+}
+
+function restoreinfoCheck(){
+
+        if [ ! -e  $HOME/.restore.info ] ; then
+                recyclebinCheck
+                touch $HOME/.restore.info
+        fi
+}
+
+function verboseFile(){
+
+        if $verbose ; then
+                echo "safe_rm: removed $1 "
+        fi
+}
+
+function interactiveFile() {
+
+        if $interactive ; then
+                read -p  "Do you want to delete $1?(y/n)" response
+                if [ $response == 'y' ] ; then
+                        moveFile $1
+                elif [ $response == 'n' ] ; then
+                        exit
+                else
+                        echo "not valid"
+                fi
+                if [ $verbose ] ; then
+                        verboseFile $1
+                fi
+        fi
+}
+
+function recursiveFile(){
+
+        if [[ -d $1 && -s $1 ]] ; then
+                        recursiveDelete $1
+        fi
+
+        #echo "recursive working"
+
+}
+
+function recursiveDelete(){
+
+        for k in $1/*
+        do
+                if [ -f $k ] ; then
+                        restorefileInfo $k
+                        moveFile $k
+                        if [ $verbose ] ; then
+                                verboseFile $k
+                        fi
+                elif [ -d $k ] && [ -s $k ] ; then
+                        recursiveDelete $k
+                fi
+        done
+
+        if [ $interactive ] ; then
+                read -p "Would you like to delete $1? (y/n)" response_r2
+                        if [ $response_r2 == 'y' ] ; then
+                                rmdir $1
+                                if [ $verbose ] ; then
+                                        verboseFile $1
+                                fi
+                        elif [ $response_r == 'n' ] ; then
+                                exit
+                        fi
+        fi
+        #echo "recursive Delete called"
+
+}
+
+function restoreinfoCheck(){
+
+        if [ ! -e  $HOME/.restore.info ] ; then
+                recyclebinCheck
+                touch $HOME/.restore.info
+        fi
+}
 
 function recyclebinCheck(){
 
         if [ ${#RMCFG} -gt 0 ] ; then
                 recyclePath=$RMCFG
-        elif [ -f $HOME/.rm.cfg ] ; then
+        elif [ -f $HOME/.rm.cfg ]; then
                 recyclePath=$(head -n1 ~/.rm.cfg)
         else
                 recyclePath=$HOME/deleted
@@ -17,59 +140,46 @@ function recyclebinCheck(){
         fi
 }
 
-function grabInfo(){
-
-        rootname=$(echo $rootname_inode | cut -d"_" -f1)
-        inode=$(echo $rootname_inode | cut -d"_" -f2)
-        restoreInfo=$(grep $rootname'_'$inode* ~/.restore.info)
-        filePath=$(echo $restoreInfo | cut -d":" -f2)
-        DirName=$(dirname $filePath)
-}
-
-function restoreFile(){
-        checkDir $1
-        mv $recyclePath/$rootname_inode $DirName/$rootname
-}
-
-function removeRestoreInfo(){
-
-        grep -nv ^$1 ~/.restore.info > ~/tempRestore
-        mv ~/tempRestore  ~/.restore.info
-}
-
-function overwriteFile(){
-
-        read -p "do you want to overwrite $rootname ? (y/n)" response2
-                if [ $response2 == 'y' ] ; then
-                        restoreFile $rootname_inode
-                        removeRestoreInfo $rootname_inode
-                else
-                        exit
-                fi
-}
-
-function checkDir() {
-
-   local directory=$(dirname $filePath)
-   if [ ! -d $directory ] ; then
-      mkdir -p $directory
-   fi
-}
-
-
-
 recyclebinCheck
+restoreinfoCheck
 
-if [ ! -e $recyclePath/$rootname_inode ] ; then
-        echo "safe_rm_restore: file does not exist"
-else
-        grabInfo $1
-fi
+checkArg $1
+checkDir $1
 
-if [[ -e $recyclePath/$rootname_inode && -e $DirName/$rootname ]] ; then
-        overwriteFile $1
-elif [ -e $recyclePath/$rootname_inode ] ; then
-        grabInfo $1
-        restoreFile $1
-        removeRestoreInfo $1
-fi
+interactive=false;
+verbose=false;
+recursive=false;
+
+
+while getopts :ivr OPT
+do
+        case $OPT in
+        i)interactive=true ;;
+        v)verbose=true ;;
+        r)recursive=true ;;
+        esac
+done
+
+shift $(($OPTIND-1))
+
+checkFileExist $1
+
+for z in $*
+do
+
+        if $recursive ; then
+                recursiveFile $z
+        elif $verbose ; then
+                restorefileInfo $z
+                moveFile $z
+                verboseFile $z
+        elif $interactive ; then
+                restorefileInfo $z
+                interactiveFile $z
+
+        else
+                restorefileInfo $z
+                moveFile $z
+        fi
+
+done
